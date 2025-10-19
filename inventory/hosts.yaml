@@ -1,0 +1,7 @@
+initial_setup:
+  hosts:
+    initial_setup_vps:
+
+normal_setup:
+  hosts:
+    normal_setup_vps:
