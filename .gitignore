@@ -3,3 +3,4 @@
 .passwords*
 .env*
 secrets.yaml
+*__pycache__*
