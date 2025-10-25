@@ -5,11 +5,6 @@
   gather_facts: true
 
   tasks:
-    - name: Include variables from normal_setup
-      ansible.builtin.include_vars:
-        file: "../inventory/group_vars/normal_setup.yaml"
-        name: normal_vars
-
     - name: Configure sudoers (NOPASSWD, disable admin, remove includes)
       block:
         - name: Block extra configs
@@ -40,7 +35,7 @@
           ansible.builtin.lineinfile:
             path: /etc/ssh/sshd_config
             regexp: '^#?Port '
-            line: "Port {{ normal_vars.ansible_port }}"
+            line: "Port {{ ans_normal_port }}"
         - name: Disable root login
           ansible.builtin.lineinfile:
             path: /etc/ssh/sshd_config
@@ -75,35 +70,6 @@
             - ssh.socket
             - ssh.service
 
-    - name: Update Ansible connection to normal port and user
-      ansible.builtin.set_fact:
-        ansible_port: "{{ normal_vars.ansible_port }}"
-        ansible_user: "{{ normal_vars.ansible_user }}"
-        ansible_ssh_private_key_file: "{{ normal_vars.ansible_ssh_private_key_file }}"
-        ansible_become: true
-
-    - name: Verify connection on new port as {{ ansible_user }}
-      become: false
-      block:
-        - name: Wait for SSH on new port
-          delegate_to: localhost
-          ansible.builtin.wait_for:
-            host: "{{ ansible_host }}"
-            port: "{{ ansible_port }}"
-            delay: 5
-            timeout: 60
-            state: started
-        - name: Check connection to host
-          delegate_to: localhost
-          ansible.builtin.command: >
-            ssh -i {{ ansible_ssh_private_key_file }}
-            -p {{ ansible_port }}
-            {{ ansible_user }}@{{ ansible_host }}
-            "echo Connection successful"
-          register: ssh_check
-          changed_when: false
-          failed_when: ssh_check.rc != 0
-
     - name: Install UFW and Fail2ban
       ansible.builtin.apt:
         name:
@@ -127,7 +93,7 @@
         - name: Allow SSH on custom port
           community.general.ufw:
             rule: allow
-            port: "{{ normal_vars.ansible_port }}"
+            port: "{{ ans_normal_port }}"
             proto: tcp
 
         - name: Enable UFW

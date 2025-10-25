@@ -1,41 +1,31 @@
 ---
-- name: Server setup - start
+- name: Start setup
   hosts: all
-  become: true
-  gather_facts: true
-
+  become: false
+  gather_facts: false
   tasks:
-    - name: Update and upgrade system
-      block:
-        - name: Apt first update
-          ansible.builtin.apt:
-            update_cache: true
-            upgrade: dist
+    - name: Start
+      ansible.builtin.debug:
+        msg: |
+          ⚙️ Starting server setup...
 
-        - name: Ask whether to reboot server now
-          ansible.builtin.pause:
-            prompt: "Reboot server after upgrade? (yes/no) [yes]"
-          register: reboot_answer
+- name: Update system
+  ansible.builtin.import_playbook: "./manage_software/update.yaml"
 
-        - name: Set reboot decision with default
-          ansible.builtin.set_fact:
-            reboot_server: "{{ reboot_answer.user_input | default('yes') | lower }}"
+- name: Add normal user
+  ansible.builtin.import_playbook: "./manage_users/add_user.yaml"
 
-        - name: System reboot
-          when: reboot_answer.user_input | lower == "yes"
-          ansible.builtin.reboot:
-            msg: "Reboot after upgrade"
-            connect_timeout: 5
-            reboot_timeout: 600
-            test_command: whoami
+- name: Configure security
+  ansible.builtin.import_playbook: "./manage_software/security.yaml"
 
-- import_playbook: user_setup.yaml
-- import_playbook: security_setup.yaml
-
-- name: Server setup - finish
+- name: Finish setup
   hosts: all
+  become: false
+  gather_facts: false
   tasks:
-    - ansible.builtin.debug:
-        msg: "✅ Server setup was successful!
+    - name: Print msg
+      ansible.builtin.debug:
+        msg: |
+          ✅ Server setup was successful!
           Now you can connect to server via:
-          ssh -i {{ ansible_ssh_private_key_file }} -p {{ ansible_port }} {{ ansible_user }}@{{ ansible_host }}"
+          ssh -i {{ ans_ssh_private_key }} -p {{ ans_normal_port }} {{ ans_normal_user }}@{{ ans_vps_host }}

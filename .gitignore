@@ -2,3 +2,4 @@
 .ansible
 .passwords*
 .env*
+secrets.yaml
