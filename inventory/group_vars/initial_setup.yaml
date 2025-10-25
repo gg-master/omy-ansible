@@ -1,4 +1,0 @@
-ansible_port: "{{ lookup('env', 'ANS_INITIAL_PORT') }}"
-
-ansible_user: "{{ lookup('env', 'ANS_INITIAL_PORT') }}"
-ansible_ssh_pass: "{{ lookup('env', 'ANS_SSH_PASS') }}"

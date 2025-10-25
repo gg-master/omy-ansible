@@ -1,0 +1,27 @@
+---
+- name: Update and upgrade host
+  hosts: all
+  become: true
+
+  tasks:
+    - name: Apt update
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: dist
+
+    - name: Ask whether to reboot server
+      ansible.builtin.pause:
+        prompt: "Reboot server after upgrade? (yes/no) [no]"
+      register: reboot_answer
+
+    - name: Set reboot decision
+      ansible.builtin.set_fact:
+        reboot_server: "{{ reboot_answer.user_input | default('no', true) | lower }}"
+
+    - name: Reboot
+      when: reboot_answer.user_input | lower == "yes"
+      ansible.builtin.reboot:
+        msg: "Reboot after upgrade"
+        connect_timeout: 5
+        reboot_timeout: 600
+        test_command: whoami

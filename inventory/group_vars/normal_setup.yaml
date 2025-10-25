@@ -1,5 +1,0 @@
-ansible_port: "{{ lookup('env', 'ANS_NORMAL_PORT') }}"
-
-ansible_user: "{{ lookup('env', 'ANS_NORMAL_USER') }}"
-ansible_ssh_private_key_file: "{{ lookup('env', 'ANS_SSH_PRIVATE_KEY') }}"
-ans_ssh_public_key_file: "{{ lookup('env', 'ANS_SSH_PUBLIC_KEY') }}"
