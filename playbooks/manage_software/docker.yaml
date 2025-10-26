@@ -1,0 +1,94 @@
+---
+- name: Configure docker
+  hosts: all
+  become: true
+  tasks:
+    - name: Install docker
+      when: uninstall is not defined
+      block:
+        - name: Remove old Docker packages (if any)
+          ansible.builtin.apt:
+            name:
+              - docker.io
+              - docker-compose
+              - docker-compose-v2
+              - docker-doc
+              - podman-docker
+              - containerd
+              - runc
+            state: absent
+            purge: true
+            autoremove: true
+
+        - name: Install prerequisites for apt over HTTPS
+          ansible.builtin.apt:
+            name:
+              - ca-certificates
+              - curl
+              - gnupg
+              - lsb-release
+            state: present
+            update_cache: true
+
+        - name: Download Docker install script
+          ansible.builtin.get_url:
+            url: https://get.docker.com
+            dest: /tmp/get-docker.sh
+            mode: '0755'
+
+        - name: Run Docker install script
+          ansible.builtin.shell: /tmp/get-docker.sh
+          args:
+            executable: /bin/bash
+          register: docker_install
+          changed_when: "'Docker version' in docker_install.stdout"
+
+        - name: Ensure Docker service is running
+          ansible.builtin.service:
+            name: docker
+            state: started
+            enabled: true
+
+        - name: Ensure user ans_normal_user exists
+          ansible.builtin.user:
+            name: "{{ ans_normal_user }}"
+            state: present
+
+        - name: Add user ans_normal_user to docker group
+          ansible.builtin.user:
+            name: "{{ ans_normal_user }}"
+            groups: docker
+            append: true
+
+    - name: Uninstall docker
+      when: uninstall is defined and uninstall
+      block:
+        - name: Stop Docker service
+          ansible.builtin.service:
+            name: docker
+            state: stopped
+          register: docker_stop
+          failed_when: docker_stop.failed and "not found" not in docker_stop.msg
+
+        - name: Uninstall Docker Engine and dependencies
+          ansible.builtin.apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: absent
+            purge: true
+            autoremove: true
+
+        - name: Remove Docker data and config directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /var/lib/docker
+            - /var/lib/containerd
+            - /etc/docker
+            - /etc/apt/sources.list.d/docker.list
+            - /etc/apt/keyrings/docker.gpg
