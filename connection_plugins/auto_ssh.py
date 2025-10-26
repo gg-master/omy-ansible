@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+from typing import Optional
 from ansible.plugins.connection import ConnectionBase
 from ansible.plugins.loader import connection_loader
 from ansible.errors import AnsibleError
@@ -8,8 +10,8 @@ DOCUMENTATION = r"""
     connection: auto_ssh
     short_description: Automatically selects between normal and initial SSH connection
     description:
-      - This plugin tries to connect to the "normal" SSH port first.
-      - If that fails, it attempts to connect to the "initial" SSH port instead.
+      - This plugin tries to connect to the "initial" SSH port first.
+      - If that fails, it attempts to connect to the "normal" SSH port.
       - It wraps the standard SSH connection plugin.
     author: "gg-master"
     options:
@@ -51,6 +53,15 @@ DOCUMENTATION = r"""
 """
 
 
+@dataclass
+class ConnectionConfig:
+    type: str
+    port: int
+    remote_user: str
+    password: Optional[str]
+    private_key_file: Optional[str]
+
+
 class Connection(ConnectionBase):
     transport = "auto_ssh"
     has_pipelining = True
@@ -59,17 +70,6 @@ class Connection(ConnectionBase):
         super(Connection, self).__init__(*args, **kwargs)
         self.__connected = False
         self.__wrapped = None
-
-    def __try_connect(self, host: str, port: int | str) -> bool:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(2)
-        try:
-            s.connect((host, int(port)))
-            return True
-        except Exception:
-            return False
-        finally:
-            s.close()
 
     def __determine_valid_play_context(self, host: str):
         normal_port = self.get_option("ans_normal_port")
@@ -82,36 +82,48 @@ class Connection(ConnectionBase):
         if not host:
             raise AnsibleError("auto_ssh: missing ans_vps_host or ansible_host")
 
-        if initial_port and self.__try_connect(host, initial_port):
-            chosen = "initial"
-            self._display.vvv(f"auto_ssh: initial port {initial_port} is accessible")
-            self._play_context.port = int(initial_port)
-            self._play_context.remote_user = self.get_option("ans_initial_user")
-            self._play_context.password = self.get_option("ans_initial_ssh_pass")
-            self._play_context.private_key_file = None
-        elif normal_port and self.__try_connect(host, normal_port):
-            chosen = "normal"
-            self._display.vvv(f"auto_ssh: normal port {normal_port} is accessible")
-            self._play_context.port = int(normal_port)
-            self._play_context.remote_user = self.get_option("ans_normal_user")
-            self._play_context.password = None
-            self._play_context.private_key_file = self.get_option("ans_ssh_private_key")
-        else:
-            raise AnsibleError(
-                f"auto_ssh: cannot connect to {host} on ports {normal_port} or {initial_port}"
-            )
+        initial_conn = ConnectionConfig(
+            "initial",
+            int(initial_port),
+            self.get_option("ans_initial_user"),
+            self.get_option("ans_initial_ssh_pass"),
+            None,
+        )
+        normal_conn = ConnectionConfig(
+            "normal",
+            int(normal_port),
+            self.get_option("ans_normal_user"),
+            None,
+            self.get_option("ans_ssh_private_key"),
+        )
+        for c in [initial_conn, normal_conn]:
+            if self.__test_ssh_connection(host, c):
+                return
 
-        self._display.vvv(
-            f"🔐 auto_ssh selected '{chosen}' profile for {host}:{self._play_context.port}"
+        raise AnsibleError(
+            f"auto_ssh: failed all attempts of SSH connecting to {host}."
         )
 
-    def _connect(self):
-        return self.connect()
+    def __test_ssh_connection(self, host: str, config: ConnectionConfig) -> bool:
+        try:
+            with socket.create_connection((host, config.port), timeout=2) as s:
+                banner = s.recv(64)
+                if not banner.startswith(b"SSH-"):
+                    self._display.vvv(f"auto_ssh: port {config.port} is open but not SSH (banner={banner})")
+                    return False
+        except Exception:
+            return False
 
-    def connect(self):
+        self._play_context.port = config.port
+        self._play_context.remote_user = config.remote_user
+        self._play_context.password = config.password
+        self._play_context.private_key_file = config.private_key_file
+        return True
+
+    def _connect(self):
         if self.__connected:
             self._display.vvv(
-                f"auto_ssh: already connected, returning existing connection"
+                "auto_ssh: already connected, returning existing connection"
             )
             return self.__wrapped
 
@@ -120,15 +132,6 @@ class Connection(ConnectionBase):
 
         try:
             self._play_context.remote_addr = host
-
-            self._display.vvv(
-                f"auto_ssh: remote_addr set to: {self._play_context.remote_addr}"
-            )
-            self._display.vvv(f"auto_ssh: port set to: {self._play_context.port}")
-            self._display.vvv(
-                f"auto_ssh: remote_user set to: {self._play_context.remote_user}"
-            )
-
             ssh_plugin = connection_loader.get("ssh", self._play_context, None)
 
             if hasattr(ssh_plugin, "set_options"):
@@ -162,13 +165,7 @@ class Connection(ConnectionBase):
 
                 ssh_plugin.set_options(var_options=options_override)
 
-            # Call _connect instead of connect to avoid potential issues
-            if hasattr(ssh_plugin, "_connect"):
-                ssh_plugin._connect()
-            elif hasattr(ssh_plugin, "connect"):
-                ssh_plugin.connect()
-            else:
-                raise AnsibleError("SSH plugin does not have connect method")
+            ssh_plugin._connect()
 
             self.__wrapped = ssh_plugin
             self.__connected = True
@@ -181,19 +178,19 @@ class Connection(ConnectionBase):
     def exec_command(self, cmd, in_data=None, sudoable=True):
         if not self.__connected or self.__wrapped is None:
             self._display.vvv("auto_ssh: establishing connection for exec_command")
-            self.connect()
+            self._connect()
         return self.__wrapped.exec_command(cmd, in_data, sudoable)
 
     def put_file(self, in_path, out_path):
         if not self.__connected or self.__wrapped is None:
             self._display.vvv("auto_ssh: establishing connection for put_file")
-            self.connect()
+            self._connect()
         return self.__wrapped.put_file(in_path, out_path)
 
     def fetch_file(self, in_path, out_path):
         if not self.__connected or self.__wrapped is None:
             self._display.vvv("auto_ssh: establishing connection for fetch_file")
-            self.connect()
+            self._connect()
         return self.__wrapped.fetch_file(in_path, out_path)
 
     def close(self):
