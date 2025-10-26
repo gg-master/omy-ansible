@@ -25,7 +25,7 @@
   tasks:
     - name: Print msg
       ansible.builtin.debug:
-        msg: |
+        msg: |-
           ✅ Server setup was successful!
           Now you can connect to server via:
           ssh -i {{ ans_ssh_private_key }} -p {{ ans_normal_port }} {{ ans_normal_user }}@{{ ans_vps_host }}
