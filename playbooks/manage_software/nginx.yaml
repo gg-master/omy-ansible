@@ -1,0 +1,100 @@
+---
+- name: Install and configure nginx with stream support
+  hosts: all
+  become: true
+
+  vars:
+    nginx_conf: /etc/nginx/nginx.conf
+    stream_dir: /etc/nginx/stream-enabled
+    sites_avail: /etc/nginx/sites-available
+    sites_enabl: /etc/nginx/sites-enabled
+    proxy_conf: /etc/nginx/stream-enabled/proxy.conf
+
+  tasks:
+    - name: Ensure nginx-full is installed
+      ansible.builtin.apt:
+        name: nginx-full
+        state: present
+        update_cache: true
+
+    - name: Ensure nginx directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        owner: "{{ ans_normal_user }}"
+        group: "{{ ans_normal_user }}"
+        mode: '0755'
+      loop:
+        - "{{ sites_avail }}"
+        - "{{ sites_enabl }}"
+        - "{{ stream_dir }}"
+
+    - name: Ensure proxy.conf exists and has base configuration if empty
+      block:
+        - name: Check if proxy.conf exists and is non-empty
+          ansible.builtin.stat:
+            path: "{{ proxy_conf }}"
+          register: proxy_stat
+
+        - name: Create or populate proxy.conf if missing or empty
+          when: not proxy_stat.stat.exists or proxy_stat.stat.size == 0
+          ansible.builtin.copy:
+            dest: "{{ proxy_conf }}"
+            owner: "{{ ans_normal_user }}"
+            group: "{{ ans_normal_user }}"
+            mode: '0644'
+            content: |
+              map $ssl_preread_server_name $sni_name {
+                  hostnames;
+              }
+
+              server {
+                  listen 443;
+                  proxy_pass $sni_name;
+                  ssl_preread on;
+              }
+
+    - name: Ensure 'stream' block with include exists in nginx.conf
+      ansible.builtin.blockinfile:
+        path: "{{ nginx_conf }}"
+        marker: "# {mark} ANSIBLE MANAGED BLOCK - STREAM CONFIG"
+        block: |
+          stream {
+                include /etc/nginx/stream-enabled/*.conf;
+          }
+        insertafter: EOF
+        backup: true
+
+    - name: Ensure 'http' block includes sites-enabled
+      ansible.builtin.lineinfile:
+        path: "{{ nginx_conf }}"
+        regexp: '^\s*include\s+/etc/nginx/sites-enabled/\*;'
+        line: '        include /etc/nginx/sites-enabled/*;'
+        insertafter: '^http\s*{'
+        backup: true
+        state: present
+
+    - name: Test nginx config
+      ansible.builtin.command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: "'successful' not in nginx_test.stderr"
+
+    - name: Reload nginx on valid config
+      when: "'successful' in nginx_test.stderr"
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+    - name: Allow ports 80 and 443 through UFW # noqa syntax-check[unknown-module]
+      community.general.ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - "80"
+        - "443"
+
+    - name: Ensure UFW is enabled
+      community.general.ufw:
+        state: enabled
