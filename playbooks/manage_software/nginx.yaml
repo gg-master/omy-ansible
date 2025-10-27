@@ -1,5 +1,5 @@
 ---
-- name: Install and configure nginx with stream support
+- name: Configure nginx
   hosts: all
   become: true
 
@@ -11,90 +11,141 @@
     proxy_conf: /etc/nginx/stream-enabled/proxy.conf
 
   tasks:
-    - name: Ensure nginx-full is installed
-      ansible.builtin.apt:
-        name: nginx-full
-        state: present
-        update_cache: true
-
-    - name: Ensure nginx directories exist
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        owner: "{{ ans_normal_user }}"
-        group: "{{ ans_normal_user }}"
-        mode: '0755'
-      loop:
-        - "{{ sites_avail }}"
-        - "{{ sites_enabl }}"
-        - "{{ stream_dir }}"
-
-    - name: Ensure proxy.conf exists and has base configuration if empty
+    - name: Install nginx
+      when: uninstall is not defined or not uninstall
       block:
-        - name: Check if proxy.conf exists and is non-empty
-          ansible.builtin.stat:
-            path: "{{ proxy_conf }}"
-          register: proxy_stat
+        - name: Ensure nginx-full is installed
+          ansible.builtin.apt:
+            name: nginx-full
+            state: present
+            update_cache: true
 
-        - name: Create or populate proxy.conf if missing or empty
-          when: not proxy_stat.stat.exists or proxy_stat.stat.size == 0
-          ansible.builtin.copy:
-            dest: "{{ proxy_conf }}"
+        - name: Ensure nginx dirs exist
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
             owner: "{{ ans_normal_user }}"
             group: "{{ ans_normal_user }}"
-            mode: '0644'
-            content: |
-              map $ssl_preread_server_name $sni_name {
-                  hostnames;
+            mode: '0755'
+          loop:
+            - "{{ sites_avail }}"
+            - "{{ sites_enabl }}"
+            - "{{ stream_dir }}"
+
+        - name: Ensure proxy.conf exists and has base config
+          block:
+            - name: Check if proxy.conf exists and is non-empty
+              ansible.builtin.stat:
+                path: "{{ proxy_conf }}"
+              register: proxy_stat
+
+            - name: Create or populate proxy.conf if missing or empty
+              when: not proxy_stat.stat.exists or proxy_stat.stat.size == 0
+              ansible.builtin.copy:
+                dest: "{{ proxy_conf }}"
+                owner: "{{ ans_normal_user }}"
+                group: "{{ ans_normal_user }}"
+                mode: '0644'
+                content: |
+                  map $ssl_preread_server_name $sni_name {
+                      hostnames;
+                  }
+
+                  server {
+                      listen 443;
+                      proxy_pass $sni_name;
+                      ssl_preread on;
+                  }
+
+        - name: Ensure 'stream' block with include exists in nginx.conf
+          ansible.builtin.blockinfile:
+            path: "{{ nginx_conf }}"
+            marker: "# {mark} ANSIBLE MANAGED BLOCK - STREAM CONFIG"
+            block: |
+              stream {
+                    include /etc/nginx/stream-enabled/*.conf;
               }
+            insertafter: EOF
+            backup: true
 
-              server {
-                  listen 443;
-                  proxy_pass $sni_name;
-                  ssl_preread on;
-              }
+        - name: Ensure 'http' block includes sites-enabled
+          ansible.builtin.lineinfile:
+            path: "{{ nginx_conf }}"
+            regexp: '^\s*include\s+/etc/nginx/sites-enabled/\*;'
+            line: '        include /etc/nginx/sites-enabled/*;'
+            insertafter: '^http\s*\{'
+            backup: true
+            state: present
 
-    - name: Ensure 'stream' block with include exists in nginx.conf
-      ansible.builtin.blockinfile:
-        path: "{{ nginx_conf }}"
-        marker: "# {mark} ANSIBLE MANAGED BLOCK - STREAM CONFIG"
-        block: |
-          stream {
-                include /etc/nginx/stream-enabled/*.conf;
-          }
-        insertafter: EOF
-        backup: true
+        - name: Test nginx config
+          ansible.builtin.command: nginx -t
+          register: nginx_test
+          changed_when: false
+          failed_when: "'successful' not in nginx_test.stderr"
 
-    - name: Ensure 'http' block includes sites-enabled
-      ansible.builtin.lineinfile:
-        path: "{{ nginx_conf }}"
-        regexp: '^\s*include\s+/etc/nginx/sites-enabled/\*;'
-        line: '        include /etc/nginx/sites-enabled/*;'
-        insertafter: '^http\s*{'
-        backup: true
-        state: present
+        - name: Reload nginx on valid config
+          when: "'successful' in nginx_test.stderr"
+          ansible.builtin.service:
+            name: nginx
+            state: reloaded
 
-    - name: Test nginx config
-      ansible.builtin.command: nginx -t
-      register: nginx_test
-      changed_when: false
-      failed_when: "'successful' not in nginx_test.stderr"
+        - name: Allow ports 80 and 443 through UFW # noqa syntax-check[unknown-module]
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+            proto: tcp
+          loop:
+            - "80"
+            - "443"
 
-    - name: Reload nginx on valid config
-      when: "'successful' in nginx_test.stderr"
-      ansible.builtin.service:
-        name: nginx
-        state: reloaded
+        - name: Ensure UFW is enabled
+          community.general.ufw:
+            state: enabled
 
-    - name: Allow ports 80 and 443 through UFW # noqa syntax-check[unknown-module]
-      community.general.ufw:
-        rule: allow
-        port: "{{ item }}"
-        proto: tcp
-      loop:
-        - "80"
-        - "443"
+    - name: Uninstall nginx
+      when: uninstall is defined and uninstall
+      block:
+        - name: Stop nginx service
+          ignore_errors: true
+          ansible.builtin.service:
+            name: nginx
+            state: stopped
 
-    - name: Ensure UFW is enabled
-      community.general.ufw:
-        state: enabled
+        - name: Backup nginx configs
+          ignore_errors: true
+          ansible.builtin.copy:
+            src: "/etc/nginx"
+            dest: "/etc/nginx.backup{{ lookup('pipe', 'date +%Y%m%d_%H%M%S') }}"
+            owner: "{{ ans_normal_user }}"
+            group: "{{ ans_normal_user }}"
+            mode: '0755'
+            remote_src: true
+
+        - name: Remove nginx and related packages
+          ansible.builtin.apt:
+            name:
+              - nginx
+              - nginx-full
+              - nginx-common
+              - nginx-core
+            state: absent
+            purge: true
+            autoremove: true
+
+        - name: Remove nginx dirs
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/nginx
+            - /var/log/nginx
+            - /var/lib/nginx
+
+        - name: Revoke UFW ports for nginx
+          community.general.ufw:
+            rule: deny
+            port: "{{ item }}"
+            proto: tcp
+          loop:
+            - "80"
+            - "443"

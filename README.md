@@ -5,9 +5,9 @@ Target VPS OS: Ubuntu 22.04+
 3. Add your hosts in `inventory/hosts.yaml`
 3. Add `secrets.yaml` file in root of project
 4. Run:
-- For initial setup: `ansible-playbook -i inventory/hosts.yaml playbooks/server_setup.yaml`
-- For configure user: `ansible-playbook -i inventory/hosts.yaml playbooks/manage_users/add_user.yaml`
-- For security setup or check: `ansible-playbook -i inventory/hosts.yaml playbooks/manage_software/security.yaml`
+- For initial setup: `ansible-playbook playbooks/server_setup.yaml`
+- For configure user: `ansible-playbook playbooks/manage_users/add_user.yaml`
+- For security setup or check: `ansible-playbook playbooks/manage_software/security.yaml`
 
 example of `secrets.yaml`
 ``` 
@@ -22,9 +22,31 @@ host1.example.com:
   ssh_public_key: "/path/to/.ssh/publicKey.pub"
 ```
 
+
+### Docker
+For install docker run:
+``` bash
+ansible-playbook playbooks/manage_software/docker.yaml
+```
+
+For uninstall docker run:
+``` bash
+ansible-playbook playbooks/manage_software/docker.yaml -e "{uninstall: true}"
+```
+
+### Nginx
+For install nginx run:
+``` bash
+ansible-playbook playbooks/manage_software/nginx.yaml
+```
+For uninstall nginx run:
+``` bash
+ansible-playbook playbooks/manage_software/nginx.yaml -e "{uninstall: true}"
+```
+
 You can also use ansible-vault for `secrets.yaml`.
 
-TODO:
+### TODO:
 - add 3x-ui config
 - add headscale config
 - add teldrive config
