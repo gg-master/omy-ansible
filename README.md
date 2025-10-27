@@ -25,7 +25,6 @@ host1.example.com:
 You can also use ansible-vault for `secrets.yaml`.
 
 TODO:
-- add nginx-full config with stream 
 - add 3x-ui config
 - add headscale config
 - add teldrive config
