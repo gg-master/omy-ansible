@@ -66,18 +66,16 @@ class Connection(ConnectionBase):
     transport = "auto_ssh"
     has_pipelining = True
 
+    _connection_cache = {}
+
     def __init__(self, *args, **kwargs):
         super(Connection, self).__init__(*args, **kwargs)
-        self.__connected = False
         self.__wrapped = None
+        self.__connected = False
 
     def __determine_valid_play_context(self, host: str):
         normal_port = self.get_option("ans_normal_port")
         initial_port = self.get_option("ans_initial_port")
-
-        self._display.vvv(
-            f"auto_ssh: attempting connection to {host}, normal_port={normal_port}, initial_port={initial_port}"
-        )
 
         if not host:
             raise AnsibleError("auto_ssh: missing ans_vps_host or ansible_host")
@@ -105,11 +103,11 @@ class Connection(ConnectionBase):
         )
 
     def __test_ssh_connection(self, host: str, config: ConnectionConfig) -> bool:
+        self._display.vv(f"auto_ssh: {config.type} connection to {host}:{config.port}")
         try:
-            with socket.create_connection((host, config.port), timeout=2) as s:
+            with socket.create_connection((host, config.port), timeout=1) as s:
                 banner = s.recv(64)
                 if not banner.startswith(b"SSH-"):
-                    self._display.vvv(f"auto_ssh: port {config.port} is open but not SSH (banner={banner})")
                     return False
         except Exception:
             return False
@@ -121,13 +119,13 @@ class Connection(ConnectionBase):
         return True
 
     def _connect(self):
-        if self.__connected:
-            self._display.vvv(
-                "auto_ssh: already connected, returning existing connection"
-            )
+        host = self.get_option("ans_vps_host")
+        if host in Connection._connection_cache:
+            self._display.vv(f"Reusing cached connection for {host}")
+            self.__wrapped = Connection._connection_cache[host]
+            self.__connected = True
             return self.__wrapped
 
-        host = self.get_option("ans_vps_host")
         self.__determine_valid_play_context(host)
 
         try:
@@ -165,10 +163,12 @@ class Connection(ConnectionBase):
 
                 ssh_plugin.set_options(var_options=options_override)
 
+            self._display.vv("auto_ssh: establish SSH connection")
             ssh_plugin._connect()
-
-            self.__wrapped = ssh_plugin
             self.__connected = True
+            self.__wrapped = ssh_plugin
+
+            Connection._connection_cache[host] = self.__wrapped
             return self.__wrapped
         except Exception as e:
             raise AnsibleError(
@@ -177,19 +177,19 @@ class Connection(ConnectionBase):
 
     def exec_command(self, cmd, in_data=None, sudoable=True):
         if not self.__connected or self.__wrapped is None:
-            self._display.vvv("auto_ssh: establishing connection for exec_command")
+            self._display.vv("auto_ssh: establishing connection for exec_command")
             self._connect()
         return self.__wrapped.exec_command(cmd, in_data, sudoable)
 
     def put_file(self, in_path, out_path):
         if not self.__connected or self.__wrapped is None:
-            self._display.vvv("auto_ssh: establishing connection for put_file")
+            self._display.vv("auto_ssh: establishing connection for put_file")
             self._connect()
         return self.__wrapped.put_file(in_path, out_path)
 
     def fetch_file(self, in_path, out_path):
         if not self.__connected or self.__wrapped is None:
-            self._display.vvv("auto_ssh: establishing connection for fetch_file")
+            self._display.vv("auto_ssh: establishing connection for fetch_file")
             self._connect()
         return self.__wrapped.fetch_file(in_path, out_path)
 
@@ -201,3 +201,7 @@ class Connection(ConnectionBase):
                 pass
         self.__wrapped = None
         self.__connected = False
+
+        host = self.get_option("ans_vps_host")
+        if host in Connection._connection_cache:
+            del Connection._connection_cache[host]
