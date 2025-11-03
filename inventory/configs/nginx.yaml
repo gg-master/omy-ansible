@@ -1,0 +1,5 @@
+nginx_conf: /etc/nginx/nginx.conf
+nginx_stream_dir: /etc/nginx/stream-enabled
+nginx_sites_avail: /etc/nginx/sites-available
+nginx_sites_enabl: /etc/nginx/sites-enabled
+nginx_proxy_conf: /etc/nginx/stream-enabled/proxy.conf

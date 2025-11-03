@@ -3,12 +3,8 @@
   hosts: all
   become: true
 
-  vars:
-    nginx_conf: /etc/nginx/nginx.conf
-    stream_dir: /etc/nginx/stream-enabled
-    sites_avail: /etc/nginx/sites-available
-    sites_enabl: /etc/nginx/sites-enabled
-    proxy_conf: /etc/nginx/stream-enabled/proxy.conf
+  vars_files:
+    - ../../../inventory/configs/nginx.yaml
 
   tasks:
     - name: Install nginx
@@ -28,21 +24,21 @@
             group: "{{ ans_normal_user }}"
             mode: '0755'
           loop:
-            - "{{ sites_avail }}"
-            - "{{ sites_enabl }}"
-            - "{{ stream_dir }}"
+            - "{{ nginx_sites_avail }}"
+            - "{{ nginx_sites_enabl }}"
+            - "{{ nginx_stream_dir }}"
 
         - name: Ensure proxy.conf exists and has base config
           block:
             - name: Check if proxy.conf exists and is non-empty
               ansible.builtin.stat:
-                path: "{{ proxy_conf }}"
+                path: "{{ nginx_proxy_conf }}"
               register: proxy_stat
 
             - name: Create or populate proxy.conf if missing or empty
               when: not proxy_stat.stat.exists or proxy_stat.stat.size == 0
               ansible.builtin.copy:
-                dest: "{{ proxy_conf }}"
+                dest: "{{ nginx_proxy_conf }}"
                 owner: "{{ ans_normal_user }}"
                 group: "{{ ans_normal_user }}"
                 mode: '0644'
@@ -105,6 +101,15 @@
     - name: Uninstall nginx
       when: uninstall is defined and uninstall
       block:
+        - name: Confirm uninstallation
+          ansible.builtin.pause:
+            prompt: "⚠️ Do you really want to DELETE the `nginx` and all related data? (y/N)"
+          register: uninstall_confirm
+
+        - name: Cancel uninstallation
+          when: uninstall_confirm.user_input | lower not in ["y", "yes"]
+          ansible.builtin.meta: end_play
+
         - name: Stop nginx service
           ignore_errors: true
           ansible.builtin.service:

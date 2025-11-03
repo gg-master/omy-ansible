@@ -1,0 +1,12 @@
+image_name: ghcr.io/mhsanaei/3x-ui:latest
+container_name: "3x-ui"
+
+panel_dir: "/opt/3x-ui"
+panel_path: "/yoursecretword" # example panel path
+
+panel_port: 55000 # example panel port
+
+http_panel_port: 8088 # default port for simple nginx proxy config
+https_panel_port: 7443 # example https panel port
+
+anti_probing_port: 55001 # port for routing default traffic from 443 port

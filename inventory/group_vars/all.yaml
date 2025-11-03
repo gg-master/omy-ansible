@@ -4,11 +4,12 @@ ansible_python_interpreter: /usr/bin/python3
 secrets: "{{ lookup('file', inventory_dir + '/../secrets.yaml') | from_yaml }}"
 
 ans_vps_host: "{{ secrets[inventory_hostname].host }}"
-ans_ssh_public_key: "{{ secrets[inventory_hostname].ssh_public_key }}"
+ans_domains: "{{ secrets[inventory_hostname].domains }}"
 
 ans_normal_port: "{{ secrets[inventory_hostname].normal_port }}"
 ans_normal_user: "{{ secrets[inventory_hostname].normal_user }}"
 ans_ssh_private_key: "{{ secrets[inventory_hostname].ssh_private_key }}"
+ans_ssh_public_key: "{{ secrets[inventory_hostname].ssh_public_key }}"
 
 ans_initial_port: "{{ secrets[inventory_hostname].initial_port }}"
 ans_initial_user: "{{ secrets[inventory_hostname].initial_user }}"
