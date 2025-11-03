@@ -63,6 +63,15 @@
     - name: Uninstall docker
       when: uninstall is defined and uninstall
       block:
+        - name: Confirm uninstallation
+          ansible.builtin.pause:
+            prompt: "⚠️ Do you really want to DELETE the `docker` and all related data? (y/N)"
+          register: uninstall_confirm
+
+        - name: Cancel uninstallation
+          when: uninstall_confirm.user_input | lower not in ["y", "yes"]
+          ansible.builtin.meta: end_play
+
         - name: Stop Docker service
           ansible.builtin.service:
             name: docker

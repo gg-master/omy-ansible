@@ -1,0 +1,72 @@
+---
+- name: Manage nginx stream record
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../../../inventory/configs/nginx.yaml
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+  tasks:
+    - name: Add nginx stream record
+      when: uninstall is not defined or not uninstall
+      block:
+        - name: Check required vars
+          ansible.builtin.assert:
+            that:
+              - domain is defined
+              - https_port is defined
+            fail_msg: "Check that: [domain, https_port] are passed"
+
+        - name: Add record to map block in {{ nginx_proxy_conf }}
+          ansible.builtin.blockinfile:
+            path: "{{ nginx_proxy_conf }}"
+            marker: "# {mark} ANSIBLE MAP BLOCK for {{ domain }}"
+            block: "    {{ domain }} {{ domain }};"
+            insertafter: "hostnames;"
+            state: present
+
+        - name: Add new upstream block in {{ nginx_proxy_conf }}
+          ansible.builtin.blockinfile:
+            path: "{{ nginx_proxy_conf }}"
+            marker: "# {mark} ANSIBLE UPSTREAM BLOCK for {{ domain }}"
+            block: |
+              upstream {{ domain }} {
+                  server 127.0.0.1:{{ https_port }};
+              }
+            insertbefore: "server {"
+            state: present
+
+    - name: Remove nginx stream record
+      when: uninstall is defined and uninstall
+      block:
+        - name: Check required vars
+          ansible.builtin.assert:
+            that:
+              - domain is defined
+            fail_msg: "Check that: [domain] are passed"
+
+        - name: Remove record from map block in {{ nginx_proxy_conf }}
+          ansible.builtin.blockinfile:
+            path: "{{ nginx_proxy_conf }}"
+            marker: "# {mark} ANSIBLE MAP BLOCK for {{ domain }}"
+            state: absent
+
+        - name: Remove upstream block from {{ nginx_proxy_conf }}
+          ansible.builtin.blockinfile:
+            path: "{{ nginx_proxy_conf }}"
+            marker: "# {mark} ANSIBLE UPSTREAM BLOCK for {{ domain }}"
+            state: absent
+
+    - name: Test nginx config
+      ansible.builtin.command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: "'successful' not in nginx_test.stderr"
+      notify: Reload nginx

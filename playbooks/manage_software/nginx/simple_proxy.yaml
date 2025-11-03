@@ -1,0 +1,89 @@
+---
+- name: Manage simple nginx proxy config
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../../../inventory/configs/nginx.yaml
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+  tasks:
+    - name: Add new nginx config
+      when: uninstall is not defined or not uninstall
+      block:
+        - name: Check required vars
+          ansible.builtin.assert:
+            that:
+              - domain is defined
+              - http_port is defined
+              - http_proxy_port is defined
+            fail_msg: "Check that: [domain, http_port, http_proxy_port] are passed"
+
+        - name: Create new nginx config
+          ansible.builtin.copy:
+            dest: "{{ nginx_sites_avail }}/{{ domain }}.conf"
+            mode: "0644"
+            content: |
+              server {
+                  listen {{ http_port }};
+                  server_name {{ domain }};
+
+                  location / {
+                      proxy_pass http://127.0.0.1:{{ http_proxy_port }};
+                      proxy_set_header Host $host;
+                      proxy_set_header X-Real-IP $remote_addr;
+                      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                  }
+              }
+
+        - name: Enable new nginx config
+          ansible.builtin.file:
+            src: "{{ nginx_sites_avail }}/{{ domain }}.conf"
+            dest: "{{ nginx_sites_enabl }}/{{ domain }}.conf"
+            state: link
+            force: true
+
+        - name: Enable ports in UFW # noqa syntax-check[unknown-module]
+          community.general.ufw:
+            rule: allow
+            port: "{{ http_port }}"
+
+    - name: Remove simple nginx config
+      when: uninstall is defined and uninstall
+      block:
+        - name: Check required vars
+          ansible.builtin.assert:
+            that:
+              - domain is defined
+              - http_port is defined
+            fail_msg: "Check that: [domain, http_port] are passed"
+
+        - name: Disable nginx config
+          ansible.builtin.file:
+            path: "{{ nginx_sites_enabl }}/{{ domain }}.conf"
+            state: absent
+          when: uninstall is defined and uninstall
+
+        - name: Remove nginx config file
+          ansible.builtin.file:
+            path: "{{ nginx_sites_avail }}/{{ domain }}.conf"
+            state: absent
+          when: uninstall is defined and uninstall
+
+        - name: Disable ports in UFW # noqa syntax-check[unknown-module]
+          community.general.ufw:
+            rule: deny
+            port: "{{ http_port }}"
+
+    - name: Test nginx config
+      ansible.builtin.command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: "'successful' not in nginx_test.stderr"
+      notify: Reload nginx

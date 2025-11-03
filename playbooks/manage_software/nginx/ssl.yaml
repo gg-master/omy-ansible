@@ -1,0 +1,68 @@
+---
+- name: Issue SSL certificate via Let's Encrypt
+  hosts: all
+  become: true
+  gather_facts: false
+
+  vars_files:
+    - ../../../inventory/configs/nginx.yaml
+
+  handlers:
+    - name: Reload nginx
+      ansible.builtin.service:
+        name: nginx
+        state: reloaded
+
+  tasks:
+    - name: Check required vars
+      ansible.builtin.assert:
+        that:
+          - domain is defined
+          - https_port is defined
+        fail_msg: "Check that: [domain, https_port] are passed"
+
+    - name: Add SSL certificate
+      when: uninstall is not defined or not uninstall
+      block:
+        - name: Issue a Let's Encrypt certificate
+          ansible.builtin.shell: |
+            certbot --nginx -d {{ domain }} --non-interactive --agree-tos -m admin@{{ domain }}
+          args:
+            creates: /etc/letsencrypt/live/{{ domain }}/fullchain.pem
+
+        - name: Change HTTPS port on {{ https_port }}
+          ansible.builtin.lineinfile:
+            path: "{{ nginx_sites_avail }}/{{ domain }}.conf"
+            regexp: 'listen 443 ssl;'
+            line: "listen {{ https_port }} ssl;"
+          notify: Reload nginx
+
+        - name: Enable ports in UFW # noqa syntax-check[unknown-module]
+          community.general.ufw:
+            rule: allow
+            port: "{{ item }}"
+          loop:
+            - "{{ https_port }}"
+
+    - name: Remove SSL certificate
+      when: uninstall is defined and uninstall
+      block:
+        - name: Disable ports in UFW # noqa syntax-check[unknown-module]
+          community.general.ufw:
+            rule: deny
+            port: "{{ item }}"
+          loop:
+            - "{{ https_port }}"
+
+        - name: Remove certs directory
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /etc/letsencrypt/live/{{ domain }}
+
+- name: Add stream record
+  ansible.builtin.import_playbook: "./stream.yaml"
+  vars:
+    domain: "{{ domain }}"
+    https_port: "{{ https_port }}"
