@@ -93,6 +93,8 @@
           loop:
             - "80"
             - "443"
+            - "{{ ans_normal_port }}"
+            - "{{ ans_initial_port }}"
 
         - name: Ensure UFW is enabled
           community.general.ufw:

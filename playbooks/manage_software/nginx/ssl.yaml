@@ -14,6 +14,14 @@
         state: reloaded
 
   tasks:
+    - name: Ensure certbot is installed
+      ansible.builtin.apt:
+        name: 
+          - certbot
+          - python3-certbot-nginx
+        state: present
+        update_cache: true
+
     - name: Check required vars
       ansible.builtin.assert:
         that:
